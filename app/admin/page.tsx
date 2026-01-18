@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
 import Link from 'next/link';
-import { ArrowLeft, CheckCircle, Clock, XCircle, MapPin, ExternalLink } from 'lucide-react';
+import { useRouter } from 'next/navigation'; // Import Router
+import { ArrowLeft, CheckCircle, Clock, XCircle, MapPin, ExternalLink, LogOut, ShieldAlert } from 'lucide-react';
 
 interface Report {
   id: string;
@@ -18,8 +19,34 @@ interface Report {
 }
 
 export default function AdminPage() {
+  const router = useRouter();
   const [reports, setReports] = useState<Report[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(false); 
+
+  // --- LOGIC KEAMANAN HALAMAN ADMIN ---
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    const role = localStorage.getItem('user_role'); // Ambil role user
+
+    // 1. Cek Apakah Token Ada?
+    if (!token) {
+      router.push('/login');
+      return;
+    }
+
+    // 2. Cek Apakah Role-nya Admin?
+    if (role !== 'admin') {
+      alert('Akses Ditolak! Halaman ini khusus petugas dinas.');
+      router.push('/profile'); // Tendang user biasa ke profil mereka
+      return;
+    }
+
+    // Jika lolos semua cek, izinkan masuk
+    setIsAuthenticated(true);
+    fetchReports();
+  }, []);
+  // ------------------------------------
 
   const fetchReports = async () => {
     setLoading(true);
@@ -30,24 +57,43 @@ export default function AdminPage() {
       );
       setReports(sorted);
     } catch (err) {
-      alert('Gagal ambil data');
+      console.error(err);
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    fetchReports();
-  }, []);
-
   const handleUpdateStatus = async (id: string, newStatus: string) => {
     if(!confirm(`Ubah status jadi ${newStatus}?`)) return;
+
     try {
-      await axios.patch(`http://localhost:3000/reports/${id}/status`, { status: newStatus });
+      const token = localStorage.getItem('token'); // Ambil token untuk izin update
+
+      await axios.patch(
+        `http://localhost:3000/reports/${id}/status`, 
+        { status: newStatus },
+        {
+          headers: {
+            Authorization: `Bearer ${token}` // Sertakan token di header
+          }
+        }
+      );
+      
       fetchReports(); 
-    } catch (err) {
-      alert('Gagal update status');
+    } catch (err: any) {
+      if (err.response?.status === 401) {
+        alert('Sesi habis. Silakan login ulang.');
+        handleLogout();
+      } else {
+        alert('Gagal update status. Pastikan Anda adalah Admin.');
+      }
     }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user_role');
+    router.push('/login');
   };
 
   const getStatusBadge = (status: string) => {
@@ -60,6 +106,9 @@ export default function AdminPage() {
     }
   };
 
+  // Jangan render konten kalau belum lolos auth (biar gak kedip)
+  if (!isAuthenticated) return null;
+
   return (
     <div className="min-h-screen bg-gray-50 p-4 md:p-8 font-sans">
       <div className="max-w-7xl mx-auto">
@@ -71,19 +120,30 @@ export default function AdminPage() {
                 <ArrowLeft className="w-5 h-5 text-gray-600" />
              </Link>
              <div>
-               <h1 className="text-2xl md:text-3xl font-bold text-gray-800">Dashboard Dinas</h1>
-               <p className="text-gray-500 text-sm">Panel admin untuk pengelolaan laporan masuk.</p>
+               <h1 className="text-2xl md:text-3xl font-bold text-gray-800 flex items-center gap-2">
+                 <ShieldAlert className="w-6 h-6 text-blue-600"/> Dashboard Dinas
+               </h1>
+               <p className="text-gray-500 text-sm">Mode Administrator</p>
              </div>
           </div>
-          <button 
-            onClick={fetchReports} 
-            className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm font-medium transition shadow-sm"
-          >
-            Refresh Data
-          </button>
+          
+          <div className="flex items-center gap-3">
+             <button 
+                onClick={fetchReports} 
+                className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm font-medium transition shadow-sm"
+              >
+                Refresh Data
+              </button>
+             <button 
+                onClick={handleLogout} 
+                className="px-4 py-2 bg-red-50 border border-red-200 text-red-700 rounded-lg hover:bg-red-100 text-sm font-medium transition shadow-sm flex items-center gap-2"
+              >
+                <LogOut className="w-4 h-4" /> Logout
+              </button>
+          </div>
         </div>
 
-        {/* Tabel Container dengan Scroll Horizontal */}
+        {/* Tabel Container */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse whitespace-nowrap">
@@ -123,6 +183,7 @@ export default function AdminPage() {
                     <td className="p-4">
                       {report.location ? (
                          <a 
+                           // Saya perbaiki URL maps-nya menggunakan format standar Google Maps yang lebih aman
                            href={`https://www.google.com/maps?q=${report.location.coordinates[1]},${report.location.coordinates[0]}`} 
                            target="_blank" 
                            rel="noreferrer"
@@ -174,10 +235,7 @@ export default function AdminPage() {
           
           {reports.length === 0 && !loading && (
             <div className="p-12 text-center flex flex-col items-center justify-center text-gray-500">
-              <div className="bg-gray-100 p-4 rounded-full mb-3">
-                <Clock className="w-6 h-6 text-gray-400" />
-              </div>
-              <p>Belum ada laporan masuk saat ini.</p>
+              <p>Belum ada laporan masuk.</p>
             </div>
           )}
         </div>
